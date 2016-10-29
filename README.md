@@ -1,6 +1,6 @@
 # SVPGen_and_Rad
 
-This repository contains the codes I used to generate the results for my Master's thesis available [here][1], and a similar journal publication available [here][2]. They produce geometries such as the one seen below:
+This repository contains the codes I used to generate the results for my Master's thesis available [here][1], and a similar journal publication (Ref. \[1]). They produce geometries such as the one seen below:
 
 ![Sample Porous Block](test/porous_block.png?raw=true "Sample Porous Block")
 
@@ -12,7 +12,8 @@ Further details on usage and issues are given in the comments of each of the scr
 
 I have applied MIT Licencses to both of the scripts.
 
+\[1] Dyck, N. J., & Straatman, A. G. (2015). A new approach to digital generation of spherical void phase porous media microstructures. International Journal of Heat and Mass Transfer, 81(0), 470–477. article. Retrieved from http://www.sciencedirect.com/science/article/pii/S0017931014009028
+
 [1]: http://ir.lib.uwo.ca/etd/2506/
-[2]: http://www.sciencedirect.com/science/article/pii/S0017931014009028
 [3]: https://yade-dem.org/doc/index.html
 [4]: http://www.solidworks.com/
