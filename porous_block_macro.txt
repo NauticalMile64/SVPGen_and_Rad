@@ -1,0 +1,708 @@
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'The MIT License (MIT)
+
+'Copyright (c) 2015 Nolan Dyck
+
+'Permission is hereby granted, free of charge, to any person obtaining a copy
+'of this software and associated documentation files (the "Software"), to deal
+'in the Software without restriction, including without limitation the rights
+'to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+'copies of the Software, and to permit persons to whom the Software is
+'furnished to do so, subject to the following conditions:
+
+'The above copyright notice and this permission notice shall be included in
+'all copies or substantial portions of the Software.
+
+'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+'IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+'FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+'AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+'LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+'THE SOFTWARE.
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'NOTES:
+'
+'The purpose of this software (macro) is to model samples of spherical-void-phase (SVP) porous media and packed beds of spherical particles.
+'The macro was originally written to model the domains generated using Yet Another Development Engine (YADE) software,
+'but as long as the input data conforms to the specifications outlined below, there shouldn't be any issues.
+'IMPORTANT: this macro does NOT generate domains from scratch (i.e. from statistical information describing the porous media of interest),
+'it only creates the solidworks models from sphere locations given in the file named:
+
+'   <integer>_sphin.txt
+
+'which should contain lines of data in the following format:
+
+'   <x> <y> <z> <r>
+
+'Where <x>, <y>, and <z> are the x, y, and z co-ordinates of a sphere, and <r> is its radius
+'In addition, an accompanying file called:
+
+'   <integer>_comin.txt
+
+'which should contain lines of data in the following format:
+
+'   <REVL x-dimension>
+'   <REVL y-dimension>
+'   <REVL z-dimension>
+'   <porosity>
+'   <mean sphere radius>
+'   <standard deviation of radius>
+'   <number of primitives>
+'   <number of spheres = number of primitives + wrapped primitives>
+
+'should contain the length of the edge length of the cubic sample (the REV length) on the second line of the file.
+'This is also the file which the interfcial surface area per unit volume will be written at the end of the macro to the _comin file.
+'Finally, 2 log files will be created, called <integer>_output.txt and <integer>_sphfail.txt, which are the log file and a list of any
+'failed features, respectively.
+
+'When finished, a part named <integer>_part.sldprt will be saved in the specified working directory along with a parasolid file by the same name.
+'Each part should have two configurations named 'Positive Volume' and 'Negative Volume'. The positive volume is the solid matrix in the case of
+'SVP porous media, and the negative volume represents the fluid volume. For packed beds the meaning of these configurations is reversed.
+'I highly reccomend that any users of this macro do a manual check of each complete part when it is finished (i.e. open up each one) to check
+'for the following issues.
+
+'ISSUES:
+'1. Often a sphere will *just* interfere with a neighbouring sphere, or the edge of the domain, such that there is a single point of contact
+'between the two bodies. Solidworks doesn't like these cases, as they result in 'zero-thickness geometry'. This is evidenced by a visible sketch
+'which has not been revolved in the final model. Under these circumstances I have had success with two approaches A) I just delete the part
+'and the files associated and create a new random geometry which hopefully doesn't have any zero-thickness geometry. B) I manually edit the
+'problem sketch by changing a single co-ordinate by a very small amount. This can be enough to resolve the zero-thickness geometry errors, but
+'if the sphere happens to be intersecting a face, changing the co-ordinates slightly may destroy the periodicity with the opposing face.
+
+'2. The combine operations will fail for some reason. Sometimes the combine operations at the end of the macro will be unsuccessful.
+'This is sometimes due to the creation of zero-thickness geometry. In that case the problem is very difficult to diagnose (e.g. there is
+'a single sphere just touching the cube its being subtracted from, but solidworks cannot highlight the sphere which is causing the issue)
+'When I come across this case, I have always resorted to deleting the model, and retrying with a fresh set of data. Sometimes however, the
+'combine operation fails for unknown reasons, and I have been successful in performing the combine operation using the GUI, so make sure you try
+'to do the combine yourself before restarting.
+
+'These are the only issues that appear to be persistent.
+
+'The macro has been run successfully using Solidworks 2013,2014, and 2015 Educational Edition Software.
+
+Dim swApp As Object
+
+Dim Part As SldWorks.ModelDoc2
+Dim PartDoc As SldWorks.PartDoc
+Dim boolstatus As Boolean
+Dim longstatus As Long, longwarnings As Long
+Dim fileerror   As Long
+Dim filewarning As Long
+
+Dim LocPoint As SldWorks.SketchPoint
+Dim SldFast As Boolean
+Dim PathRoot As String
+Dim FinalConfig As String
+
+Sub Main()
+    
+    'Initializing application and document objects
+    Set swApp = Application.SldWorks
+    
+    'File Path of working directory
+    PathRoot = "C:\Users\Nolan Dyck\Documents\Solidworks Macros\"
+    
+    'Set whether the part is saved with the positive or negative volume configuration
+    'Choose "Positive" or "Negative"
+    FinalConfig = "Negative"
+    
+    'Fast Switch
+    SldFast = True
+    'Setting SldFast to true changes a bunch of settings to try and improve modelling speed
+    'This also makes solidworks invisible
+    If SldFast Then
+        swApp.SetUserPreferenceToggle swPerformanceAlwaysGenerateCurvature, False
+        swApp.SetUserPreferenceIntegerValue swLevelOfDetail, 1
+        swApp.SetUserPreferenceToggle swSketchAcceptNumericInput, False
+        swApp.SetUserPreferenceToggle swAddDimensionsToSketchEntity, False
+        swApp.SetUserPreferenceToggle swAutoNormalToSketchMode, False
+    End If
+    
+    Dim Frame As SldWorks.Frame
+    Set Frame = swApp.Frame
+    If SldFast Then
+        'Remove User Control
+        swApp.UserControl = False
+        swApp.Visible = False
+        
+        'Setting the frame to keep invisible ensures that the document is invisible
+        'This improves performance
+        Frame.KeepInvisible = True
+        swApp.UserControlBackground = True
+    End If
+    swApp.SetUserPreferenceToggle swInputDimValOnCreate, False
+    
+    'NOTICE: This subroutine takes a while; Solidworks is not really built for these kinds of tasks.
+    'I have found it takes around 12 minutes to model 1 REV with 200 spheres on a workstation equipped with an Intel i7 + Nvidia GeForceGT 240
+    
+    Dim tStart, tEnd
+    tStart = Timer
+    
+    'If you want to just model one domain, a single call is required. For multiple domains, a for loop makes things easier.
+    
+    generateDomain (0)
+    'For i = 0 To 4
+    '    generateDomain (i)
+    'Next i
+    
+    tEnd = Timer
+    Debug.Print "Run Time = ", (tEnd - tStart)
+    
+    'Reset the performance parameters (making solidworks visible again)
+    If SldFast Then
+        Frame.KeepInvisible = False
+        
+        swApp.UserControlBackground = False
+        swApp.UserControl = True
+        swApp.Visible = True
+        
+        Part.SketchManager.DisplayWhenAdded = True
+        Part.SketchManager.AddToDB = False
+        
+        swApp.SetUserPreferenceToggle swAutoNormalToSketchMode, True
+        swApp.SetUserPreferenceToggle swAddDimensionsToSketchEntity, True
+        swApp.SetUserPreferenceToggle swSketchAcceptNumericInput, True
+        swApp.SetUserPreferenceToggle swPerformanceAlwaysGenerateCurvature, True
+        swApp.SetUserPreferenceIntegerValue swLevelOfDetail, 20
+    End If
+    
+    swApp.SetUserPreferenceToggle swInputDimValOnCreate, True
+    
+End Sub
+
+Sub generateDomain(REVNum As Integer)
+
+    Set Part = swApp.ActiveDoc
+    
+    'Selection Objects
+    Dim selData As SldWorks.SelectData
+    Dim selDataAxis As SldWorks.SelectData
+    Dim selDataTool As SldWorks.SelectData
+    
+    'Create new objects and variables
+    Dim RandType As Integer
+    Dim Void As Object
+    Dim CurSketch As SldWorks.Sketch
+    Dim Line As SldWorks.SketchLine
+    Dim RDim As SldWorks.Dimension
+    Dim RDisplayDim As SldWorks.DisplayDimension
+    Dim resetCount As Integer
+    Dim saveCount As Integer
+    Dim maxSave As Integer
+    Dim exitCount As Integer
+    Dim maxLoop As Integer
+    Dim docCount As Integer
+    Dim maxDoc As Integer
+    Dim failCount As Integer
+    
+    maxLoop = 10000     'Creates a maximum of this many spheres. Set this to a low number (e.g. 10) for testing
+    maxSave = 50        'Saves after this many spheres have been modelled
+    
+    'Initialize some counters
+    resetCount = 0
+    failCount = 0
+    saveCount = 0
+    docCount = 0
+    exitCount = resetCount
+    
+    'Variables to hold sphere locations
+    Dim x As Double
+    Dim y As Double
+    Dim z As Double
+    Dim R As Double
+    
+    'Setup file management variables
+    Dim sphin As String
+    Dim comin As String
+    Dim output As String
+    Dim sphfail As String
+    
+    Dim REVNumStr As String
+    REVNumStr = CStr(REVNum)
+    
+    'Open Input and output text files
+    sphin = PathRoot + REVNumStr + "_sphin.txt"
+    comin = PathRoot + REVNumStr + "_comin.txt"
+    output = PathRoot + REVNumStr + "_output.txt"
+    sphfail = PathRoot + REVNumStr + "_sphfail.txt"
+    
+    Open sphin For Input As #1
+    Open comin For Input As #2
+    Open output For Output As #3
+    Open sphfail For Output As #4
+    
+    'This gets the most recent feature when resuming a model (I haven't ever bothered to test this though)
+    Dim i As Integer
+    If resetCount > 0 Then
+        For i = resetCount To 1
+            Input #1, x, y, z, R
+        Next i
+    End If
+    
+    swApp.SetCurrentWorkingDirectory (PathRoot)
+    
+    If Not Part Is Nothing Then
+        Debug.Print "Documents open."
+        swApp.CloseAllDocuments True
+    End If
+    
+    'Tries to find the template for a blank part
+    Dim template As String
+    template = swApp.GetUserPreferenceStringValue(swDefaultTemplatePart)
+    If template = "" Then
+        template = swApp.GetDocumentTemplate(swDocPART, "", 0, 0#, 0#)
+    End If
+    
+    Set Part = swApp.NewDocument(template, swDwgPaperAsize, 5, 5)
+    If Part Is Nothing Then
+        Debug.Print "No Part"
+    End If
+    Dim swExt As SldWorks.ModelDocExtension
+    Set swExt = Part.Extension
+    Dim PartName As String
+    PartName = REVNumStr + "_part.sldprt"
+    Dim SaveSuccess As Boolean
+    SaveSuccess = swExt.SaveAs(PartName, swSaveAsCurrentVersion, swSaveAsOptions_Silent, Nothing, fileerror, filewarning)
+    
+    'Set the unit system to base SI units
+    'boolstatus = swExt.SetUserPreferenceInteger(swUnitSystem, swDetailingNoOptionSpecified, swUnitSystem_MKS)
+    
+    If SldFast Then
+        'Setting these options improves the performance
+        Part.SketchManager.DisplayWhenAdded = False
+        Part.SketchManager.AddToDB = True
+    End If
+    
+    'Store the REV Cube Dimensions
+    Dim REVl(3) As Double
+    Input #2, REVl(1)
+    Input #2, REVl(2)
+    Input #2, REVl(3)
+    
+    'Main Loop
+    Do While Not EOF(1) And (exitCount < maxLoop)
+    
+        'Get the next sphere data
+        Input #1, x, y, z, R
+        
+        'Start the sketch
+        Set CurSketch = StartSketch(x, y, z, selData)
+        
+        'Sketch the sphere profile
+        Set Line = SketchSphereProfile(selData, R)
+        
+        'Perform the revolve cut, if it's unsuccessful
+        If RevolveSphere(Line, CurSketch, selData, selDataAxis) Then
+        Else
+            failCount = failCount + 1
+            Debug.Print "Feature Unsuccessful."
+            Write #3, "Feature Unsuccessful."
+            Write #4, x; y; z; R
+            Set CurSketch = Part.GetActiveSketch2
+            If Not CurSketch Is Nothing Then
+                'Exit Sketch
+                Part.InsertSketch2 False
+            End If
+        End If
+        
+        exitCount = exitCount + 1
+        saveCount = saveCount + 1
+        
+        Write #3, "Iteration = "; exitCount
+        
+        If (saveCount >= maxSave) Then
+            Part.Save
+            saveCount = 0
+        End If
+    Loop
+    
+    'Save
+    Part.Save
+    
+    'Create two configurations (1 for the negative volume and 1 for the positive volume)
+    Dim NegVol As String
+    Dim PosVol As String
+    NegVol = "Negative Volume"
+    PosVol = "Positive Volume"
+    
+    Dim ConfigMgr As SldWorks.ConfigurationManager
+    Set ConfigMgr = Part.ConfigurationManager
+    ConfigMgr.AddConfiguration NegVol, "", "", swConfigOption_SuppressByDefault, "", ""
+    ConfigMgr.AddConfiguration PosVol, "", "", swConfigOption_SuppressByDefault, "", ""
+    
+    'Start with the negative volume configuration
+    boolstatus = Part.ShowConfiguration2(NegVol)
+    
+    'Use the Combine operation to get the intersection between the REV cube and the suspended spheres
+    Dim bodyArr1 As Variant
+    Dim numBubbleBodies As Integer
+    Set PartDoc = Part
+    bodyArr1 = PartDoc.GetBodies2(swSolidBody, False)
+    
+    If Not IsEmpty(bodyArr1) Then
+        'Each Separate Bubble body needs to be combined with a REV cube
+        'There should be one main bubble body that connects most of the bubbles
+        'and a couple of extra isolated bubbles
+        numBubbleBodies = 0
+        Dim bubbleBody As SldWorks.Body2
+        For Each Body In bodyArr1
+            numBubbleBodies = numBubbleBodies + 1
+            Call makeREV(REVl(), False, selData)
+        Next Body
+        
+        'Get the new array of bodies
+        Dim bodyArr2 As Variant
+        bodyArr2 = PartDoc.GetBodies2(swSolidBody, False)
+        
+        Dim revBody As SldWorks.Body2
+        Dim combFeat As SldWorks.Feature
+        Part.ClearSelection2 True
+        
+        'Mark the selection data for the InsertCombineFeature operation
+        Dim selDataCombine As SldWorks.SelectData
+        Set selDataCombine = Part.SelectionManager.CreateSelectData()
+        selDataCombine.Mark = 2
+        
+        'Debug.Print "numBubbleBodies = "; numBubbleBodies
+        For i = 0 To numBubbleBodies - 1
+            Set revBody = bodyArr2(i + numBubbleBodies)
+            Set bubbleBody = bodyArr2(i)
+            boolstatus = Part.SelectionManager.AddSelectionListObject(bubbleBody, selDataCombine)
+            boolstatus = Part.SelectionManager.AddSelectionListObject(revBody, selDataCombine)
+            Set combFeat = Part.FeatureManager.InsertCombineFeature(SWBODYINTERSECT, Nothing, Nothing)
+            Part.ClearSelection2 True
+        Next i
+    End If
+    
+    'Save
+    Part.Save
+    
+    'Now move onto the positive volume config
+    boolstatus = Part.ShowConfiguration2(PosVol)
+    
+    If Not IsEmpty(bodyArr1) Then
+        
+        'Get the bodyArray again
+        Dim toolBodies As Variant
+        toolBodies = PartDoc.GetBodies2(swSolidBody, False)
+        
+        'Make a new REV cube as the main body to be subtracted from
+        Call makeREV(REVl(), False, selData)
+        
+        'Get the bodyArray again
+        Dim bodyArr3 As Variant
+        bodyArr3 = PartDoc.GetBodies2(swSolidBody, False)
+        
+        'Get the REV (should be the last body)
+        Dim mainBody As SldWorks.Body2
+        Set mainBody = bodyArr3(numBubbleBodies)
+        
+        'Use the InsertCombineFeature to perform the boolean subtraction
+        Dim subtractFeat As SldWorks.Feature
+        Set subtractFeat = Part.FeatureManager.InsertCombineFeature(SWBODYCUT, mainBody, toolBodies)
+        
+        'If the method failed, try the other way to call the function
+        If subtractFeat Is Nothing Then
+            Debug.Print "subtractFeat was unsuccessful"
+            'Create the tool selection data and set mark to 2
+            Set selDataTool = Part.SelectionManager.CreateSelectData()
+            selDataTool.Mark = 2
+            Dim toolBody As SldWorks.Body2
+            For Each Body In bodyArr3
+                Set toolBody = Body
+                boolstatus = Part.SelectionManager.AddSelectionListObject(toolBody, selDataTool)
+            Next Body
+            
+            'Create the main body selection data and set mark to 1
+            Dim selDataMain As SldWorks.SelectData
+            Set selDataMain = Part.SelectionManager.CreateSelectData()
+            selDataMain.Mark = 1
+            boolstatus = Part.SelectionManager.AddSelectionListObject(mainBody, selDataMain)
+            
+            Set subtractFeat = Part.FeatureManager.InsertCombineFeature(SWBODYCUT, Nothing, Nothing)
+            If subtractFeat Is Nothing Then
+                Debug.Print "Alternate subtractFeat method also unsuccessful."
+            Else
+                Debug.Print "Alternate subtractFeat method successful."
+            End If
+        End If
+        Part.ClearSelection2 True
+    End If
+    
+    'Delete the default configuration
+    Part.DeleteConfiguration2 ("Default")
+    
+    'Write final notes to file
+    Write #3, "END OF MODEL MACRO"
+    Write #3, "Number of Spheres = "; exitCount
+    Write #3, "Failed Features = "; failCount
+    
+    'Close text files
+    Close #4
+    Close #3
+    Close #2
+    Close #1
+    
+    If SldFast Then
+        Part.SketchManager.DisplayWhenAdded = True
+        Part.SketchManager.AddToDB = False
+    End If
+    
+    'Save
+    Part.Save
+    
+    If FinalConfig = "Negative" Then
+        boolstatus = Part.ShowConfiguration2(NegVol)
+    End If
+    
+    'Save
+    Part.Save
+    
+    'Get the mass properties so we can do some final calcs
+    Dim swMassProp As SldWorks.MassProperty
+    Set swMassProp = Part.Extension.CreateMassProperty
+    
+    'Use MKS
+    swMassProp.UseSystemUnits = False
+    
+    'Calculate the total volume
+    Dim totVol As Double
+    totVol = REVl(1) * REVl(2) * REVl(3)
+    'Debug.Print "REVl = ", REVl(1)
+    'Debug.Print "totVol = ", totVol
+    
+    'Calculate the final Porosity
+    Dim porVol As Double
+    Dim por As Double
+    porVol = swMassProp.Volume
+    'Debug.Print "porVol = ", porVol
+    por = porVol / totVol
+    'Debug.Print "por = "; por
+    
+    'Get the total surface area
+    Dim totSurf As Double
+    totSurf = swMassProp.SurfaceArea
+    Debug.Print "totSurf = ", totSurf
+    
+    'Subtract the boundary faces
+    Dim effSurf As Double
+    effSurf = totSurf - 6 * por * REVl(1) * REVl(2)
+    'Debug.Print "effSurf = ", effSurf
+    
+    'Calculate beta value
+    Dim beta As Double
+    beta = effSurf / totVol
+    'Debug.Print "beta = ", beta
+    
+    'Write beta value to file
+    Open comin For Append As #5
+        Write #5, beta
+    Close #5
+    
+    Part.ClearSelection2 True
+    
+    'Show the zoomed out isometric view for the rest of the simulation
+    Part.ShowNamedView2 "*Isometric", 7
+    
+    'Save
+    Part.Save
+    
+    'Save as parasolid file
+    longstatus = Part.SaveAs3(PathRoot + CStr(REVNum) + "_part.X_T", 0, 0)
+    
+End Sub
+
+Sub makeREV(REVl() As Double, merge As Boolean, selData As SldWorks.SelectData)
+    
+    'Sketch the REV square
+    Dim REVSketch As SldWorks.Sketch
+    boolstatus = Part.Extension.SelectByID2("Front Plane", "PLANE", 0, 0, 0, True, 0, Nothing, 0)
+    Part.SketchManager.InsertSketch True
+    Part.ClearSelection2 True
+    
+    'Get the active sketch
+    Set REVSketch = Part.SketchManager.ActiveSketch
+    
+    'Draw a rectangle
+    Dim recLines As Variant
+    'recLines = Part.SketchManager.CreateCenterRectangle(0, 0, 0, 0.1, 0.1, 0.1)
+    recLines = Part.SketchManager.Create3PointCenterRectangle(0, 0, 0, 0.1, 0, 0, 0.1, 0.1, 0)
+    
+    'Add equal length constraint
+    Dim Line2 As SldWorks.SketchLine
+    Dim Line3 As SldWorks.SketchLine
+    Dim Line4 As SldWorks.SketchLine
+    Set Line2 = recLines(1)
+    Set Line3 = recLines(2)
+    Set Line4 = recLines(3)
+    If Line3 Is Nothing Then
+        Debug.Print "Line3 not collected from array."
+    End If
+    Part.ClearSelection2 True
+    
+    Dim Origin As SldWorks.SketchPoint
+    Set Origin = Part.SketchManager.CreatePoint(0, 0, 0)
+    If Origin Is Nothing Then
+        'Debug.Print "Origin not created."
+    End If
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Origin, selData)
+    If Not boolstatus Then
+        'Debug.Print "Origin not selected for fixing."
+    End If
+    Part.SketchAddConstraints "sgFIXED"
+    Part.ClearSelection2 True
+    
+    Dim RDisplayDim1 As SldWorks.DisplayDimension
+    Dim RDisplayDim2 As SldWorks.DisplayDimension
+    
+    'Dimension Sketch
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Line2, selData)
+    Set DisplayDim1 = Part.AddDimension2(0, 0, 0)
+    Part.ClearSelection2 True
+    Set REVDim1 = DisplayDim1.GetDimension2(0)
+    REVDim1.SystemValue = REVl(1)
+    Part.ClearSelection2 True
+    
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Line3, selData)
+    Set DisplayDim2 = Part.AddDimension2(0, 0, 0)
+    Part.ClearSelection2 True
+    Set REVDim2 = DisplayDim2.GetDimension2(0)
+    REVDim2.SystemValue = REVl(2)
+    Part.ClearSelection2 True
+    
+    'Fix sketch at the origin
+    Dim Line5 As SldWorks.SketchLine
+    Set Line5 = recLines(4)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Line5, selData)
+    If Not boolstatus Then
+        Debug.Print "Line not selected."
+    End If
+    'boolstatus = Part.Extension.SelectByID2("Point1@Origin", "EXTSKETCHPOINT", 0, 0, 0, False, 0, Nothing, 0)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Origin, selData)
+    If Not boolstatus Then
+      'Debug.Print "Origin not selected."
+    End If
+    Part.SketchAddConstraints "sgATMIDDLE"
+    Part.ClearSelection2 True
+    
+    'Exit Sketch
+    Part.InsertSketch2 True
+    
+    'Create The Extrusion
+    boolstatus = Part.SelectionManager.AddSelectionListObject(REVSketch, selData)
+    Dim REVext As SldWorks.Feature
+    Set REVext = Part.FeatureManager.FeatureExtrusion2(True, False, False, swEndCondMidPlane, 0, REVl(3), REVl(3), False, False, False, False, 0, 0, False, False, False, False, merge, True, True, swStartSketchPlane, 0, False)
+    Part.ClearSelection2 True
+    
+    'Show the zoomed out isometric view for the rest of the simulation
+    Part.ShowNamedView2 "*Isometric", 7
+End Sub
+
+Function StartSketch(x As Double, y As Double, z As Double, selData As SldWorks.SelectData) As SldWorks.Sketch
+
+    'Create Sketch Plane
+    Dim SketchPlane As SldWorks.RefPlane
+    boolstatus = Part.Extension.SelectByID2("Front Plane", "PLANE", 0, 0, 0, True, 0, Nothing, 0)
+
+    If z >= 0 Then
+        Set SketchPlane = Part.FeatureManager.InsertRefPlane(8, z, 0, 0, 0, 0)
+    Else
+        Set SketchPlane = Part.FeatureManager.InsertRefPlane(264, Math.Abs(z), 0, 0, 0, 0)
+    End If
+    
+    'Hide The SketchPlane
+    boolstatus = Part.SelectionManager.AddSelectionListObject(SketchPlane, selData)
+    Part.BlankRefGeom
+    Part.ClearSelection2 True
+    
+    'Start Sketching
+    boolstatus = Part.SelectionManager.AddSelectionListObject(SketchPlane, selData)
+    Part.SketchManager.InsertSketch True
+    Part.ClearSelection2 True
+    Set StartSketch = Part.SketchManager.ActiveSketch
+    
+    'Create a local point as the center of the sphere to be sketched
+    Set LocPoint = Part.SketchManager.CreatePoint(x, y, z)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(LocPoint, selData)
+    Part.SketchAddConstraints "sgFIXED"
+    Part.ClearSelection2 True
+End Function
+
+Function SketchSphereProfile(selData As SldWorks.SelectData, R As Double) As SldWorks.SketchLine
+
+    'Draw a line
+    Dim Line As SldWorks.SketchLine
+    Set Line = Part.SketchManager.CreateLine(0.2, 0.2, 0#, 0.3, 0.2, 0#)
+    Part.ClearSelection2 True
+    
+    'Draw an arc
+    Dim Arc As Object
+    Set Arc = Part.SketchManager.CreateArc(0.15, 0.125, 0#, 0.1, 0.1, 0#, 0.2, 0.1, 0#, 1)
+    Part.ClearSelection2 True
+    
+    'Constrain Sketch
+    Dim lPoint As SldWorks.SketchPoint
+    Dim Apoint As SldWorks.SketchPoint
+    
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Line, selData)
+    Part.SketchAddConstraints "sgHORIZONTAL"
+    Part.ClearSelection2 True
+    
+    Set Apoint = Arc.GetCenterPoint2
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Line, selData)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Apoint, selData)
+    Part.SketchAddConstraints "sgATMIDDLE"
+    Part.ClearSelection2 True
+    
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Apoint, selData)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(LocPoint, selData)
+    Part.SketchAddConstraints "sgCOINCIDENT"
+    Part.ClearSelection2 True
+    
+    Set lPoint = Line.GetStartPoint2
+    Set Apoint = Arc.GetStartPoint2
+    boolstatus = Part.SelectionManager.AddSelectionListObject(lPoint, selData)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Apoint, selData)
+    Part.SketchAddConstraints "sgMERGEPOINTS"   'Note the use of sgMERGEPOINTS which seems to work better than sgCOINCIDENT
+    Part.ClearSelection2 True
+    
+    Set lPoint = Line.GetEndPoint2
+    Set Apoint = Arc.GetEndPoint2
+    boolstatus = Part.SelectionManager.AddSelectionListObject(lPoint, selData)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Apoint, selData)
+    Part.SketchAddConstraints "sgMERGEPOINTS"
+    Part.ClearSelection2 True
+    
+    'Dimension Sketch
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Arc, selData)
+    Set RDisplayDim = Part.AddRadialDimension2(0, 0, 0)
+    Part.ClearSelection2 True
+    Set RDim = RDisplayDim.GetDimension2(0)
+    RDim.SystemValue = R
+    Part.ClearSelection2 True
+    
+    'Exit Sketch
+    Part.InsertSketch2 False
+    
+    Set SketchSphereProfile = Line
+End Function
+
+Function RevolveSphere(Line As SldWorks.SketchLine, CurSketch As SldWorks.Sketch, selData As SldWorks.SelectData, selDataAxis As SldWorks.SelectData) As Boolean
+    boolstatus = Part.SelectionManager.AddSelectionListObject(CurSketch, selData)
+    boolstatus = Part.SelectionManager.AddSelectionListObject(Line, selDataAxis)
+    Set Void = Part.FeatureManager.FeatureRevolve2(True, True, False, False, False, False, 0, 0, 6.2831853071796, 0, False, False, 0.01, 0.01, 0, 0, 0, True, True, True)
+    If (Void Is Nothing) Then
+        RevolveSphere = False
+        'Hide The SketchPlane
+        boolstatus = Part.SelectionManager.AddSelectionListObject(CurSketch, selData)
+        Part.BlankRefGeom
+        Part.ClearSelection2 True
+    Else
+        RevolveSphere = True
+    End If
+    Part.SelectionManager.EnableContourSelection = False
+    Part.ClearSelection2 True
+End Function
+
