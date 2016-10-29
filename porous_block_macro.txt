@@ -102,7 +102,7 @@ Sub Main()
     Set swApp = Application.SldWorks
     
     'File Path of working directory
-    PathRoot = "C:\Users\Nolan Dyck\Documents\Solidworks Macros\"
+    PathRoot = "C:\path\to\files\"
     
     'Set whether the part is saved with the positive or negative volume configuration
     'Choose "Positive" or "Negative"
