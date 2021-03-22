@@ -14,7 +14,8 @@ I am currently getting segfault errors when the GlobalStiffnessTimeStepper is ac
 '''
 
 from yade import pack,export,utils
-import cPickle,math,threading
+import math,threading
+import _pickle as cPickle
 import pickle as pkl
 import numpy as np
 
@@ -81,12 +82,12 @@ u='_'
 if runningInBatch():
 	O.run()
 else:
-	print 'normal run'
+	print('normal run')
 	done=True
 
 #This function is required for when the target strain is reached. May be useful if your completion criteria is a ceratian REV size rather than a porosity.
 def reachedTargetStrain():
-	print 'Reached Target Strain'
+	print('Reached Target Strain')
 	O.pause()
 	O.wait()
 
@@ -116,21 +117,21 @@ def checkPorosity():
 
 	#Compute the porosity and exit if criteria is met
 	por = (trueSphVol-sphCapsVol)/REVvol
-	print 'porosity = ',por
+	print('porosity = ', por)
 	if(por >= tPorosity):
-		print '+=+=+=+=+=+=+=+=+=+=+=+=+=+='
-		print 'Target porosity reached'
-		print 'Finished Simulation'
-		print 'porosity = ',por
-		print 'REVl = ', REVl[0]
+		print('+=+=+=+=+=+=+=+=+=+=+=+=+=+=')
+		print('Target porosity reached')
+		print('Finished Simulation')
+		print('porosity = ', por)
+		print('REVl = ', REVl[0])
 		if(Save==1):
 			textLoc(REVl, por)
-		print 'done = ',done
+		print('done = ',done)
 		done = True
 		O.pause()
 		O.wait()
 	O.engines[6].iterPeriod = max(int(math.ceil(porCheckInterval*(1-(por/tPorosity)**2))),5)
-	print 'por check interval = ', O.engines[6].iterPeriod
+	print('por check interval = ', O.engines[6].iterPeriod)
 
 #Check if the maximum penetration depth is exceeded. If it is larger than Dmax, then the bubble force-displacement interaction equation is being evaluated outside its stated limits and is likely behaving in a non-physical way. See Chan et al. 2010 for details
 def checkPen():
@@ -141,25 +142,25 @@ def checkPen():
 			penDepth = i.geom.penetrationDepth
 			if (penDepth > i.phys.Dmax):
 				numPen += 1
-	print 'numPen = ',numPen
-	print 'fracPen = ',float(numPen)/len(O.interactions)
+	print('numPen = ', numPen)
+	print('fracPen = ', float(numPen)/len(O.interactions))
 	return True
 
 def checkUnbalanced():
 	ubMaxF = utils.unbalancedForce(True)
 	ubAvgF = utils.unbalancedForce(False)
 	if ((ubMaxF > alMaxF) | (ubAvgF > alAvgF)):
-		print 'Unbalanced Force = checkPorosity Fail'
+		print('Unbalanced Force = checkPorosity Fail')
 		return False
 	else:
 		return True
 
 def checkPoint():
 	global done
-	print '-----------------'
-	print 'In checkPoint'
+	print('-----------------')
+	print('In checkPoint')
 	if (checkUnbalanced() & checkPen()):
-		print 'good run!'
+		print('good run!')
 		if(checkPoint.badRun > 0):
 			if(checkPoint.badRun > 1):
 				O.engines[7].iterPeriod *= 2
@@ -168,7 +169,7 @@ def checkPoint():
 			checkPoint.badRun -= 1
 #Uncomment this code if you want to try the adaptive time-stepping
 		else:
-			print 'increasing timestep'
+			print('increasing timestep')
 			O.engines[5].targetDt *= 1.05
 			if(O.engines[5].maxDt < O.engines[5].targetDt):
 				O.engines[5].maxDt = O.engines[5].targetDt
@@ -178,11 +179,11 @@ def checkPoint():
 		O.engines[5].timeStepUpdateInterval = 1
 		O.step()
 		O.engines[5].timeStepUpdateInterval = O.iter+checkPointInterval+100
-		print 'O.dt = ',O.dt
-		print '+++++++++++++++++++++++++++++'
+		print('O.dt = ',O.dt)
+		print('+++++++++++++++++++++++++++++')
 		O.run()
 	else:
-		print 'bad run!'
+		print('bad run!')
 		if (checkPoint.badRun >= maxBadRun):
 			sphOut=open(str(Row)+u+'sphin'+'.txt','w')
 			sphOut.write('The run failed. Unstable too many times in a row')
@@ -192,8 +193,8 @@ def checkPoint():
 			O.wait()
 		else:
 			checkPoint.badRun += 1
-			print 'updated badRun = ', checkPoint.badRun
-			print 'restarting...'
+			print('updated badRun = ', checkPoint.badRun)
+			print('restarting...')
 			import thread
 			thread.start_new_thread(restartFunc,())
 checkPoint.badRun = 0
@@ -211,18 +212,18 @@ def restartFunc():
 	O.step()
 	O.engines[5].timeStepUpdateInterval = O.iter+checkPointInterval+100
 	O.run()
-	print 'O.dt = ',O.dt
-	print '+++++++++++++++++++++++++++++'
+	print('O.dt = ',O.dt)
+	print('+++++++++++++++++++++++++++++')
 
 def writePen(Row):
 	global t
-	penOut=open(str(Row)+u+'intin'+'.pkl','w')
+	penOut=open(str(Row)+u+'intin'+'.pkl','wb')
 	for i in O.interactions:
 		penDepth = i.geom.penetrationDepth
 		if(penDepth > 0.0):
 			Ravg = (O.bodies[i.id1].shape.radius+O.bodies[i.id2].shape.radius)/2
 			Fratio = i.phys.fN/(2*math.pi*t*Ravg)
-			cPickle.dump(Fratio,penOut)
+			cPickle.dump(Fratio, penOut)
 	penOut.close()
 
 def writeSph(sphOut,crds,r,lim2,lim):
@@ -250,8 +251,8 @@ def textLoc(REVl,por,mask=-1):
 	R1 = REVl[1]
 	R2 = REVl[2]
 	try:
-		sphOut=open(str(Row)+u+'sphin.txt','w')
-		comOut=open(str(Row)+u+'comin.txt','w')
+		sphOut=open(str(Row) + u + 'sphin.txt','w')
+		comOut=open(str(Row) + u + 'comin.txt','w')
 	except:
 		raise RuntimeError("Problem to write into the file")
 	count=0
@@ -281,13 +282,13 @@ def textLoc(REVl,por,mask=-1):
 	np.save(str(Row)+u+'sphin',np.array(bblList))
 
 if(c == 0):
-	batRet=open('initData.pkl','a')
+	batRet=open('initData.pkl','ab')
 	REVl=O.cell.size
 	REVvol = REVl[0]*REVl[1]*REVl[2]
 	por=sphVol/REVvol
-	cPickle.dump(por,batRet)
-	cPickle.dump(r,batRet)
-	cPickle.dump(numSpheres,batRet)
+	cPickle.dump(por, batRet)
+	cPickle.dump(r, batRet)
+	cPickle.dump(numSpheres, batRet)
 	batRet.close()
 
 #Don't finish the script unless done=True
