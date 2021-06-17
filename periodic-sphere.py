@@ -28,7 +28,7 @@ porCheckInterval = 5000		#How often the porosity is checked for convergence
 checkPointInterval = 10000	#How often the simulation is checkpointed for potential restarts
 
 r=3e-4			#Mean Radius (m)
-s=1.2e-4		#Width of uniform distribution from which radii are selected (m)
+s=0.5		#Sphere radii are uniformly distributed between r*(1-s) and r*(1+s)
 N=100			#Number of spheres
 t=0.065		#Surface tension coefficient (N/m)
 p=0.8			#Desired porosity
