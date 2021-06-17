@@ -10,6 +10,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 This code has been run successfully on Ubuntu 14.10 with yadedaily version 1.20.0-72-bbff50f~trusty
 
+More recently tested with yade 2020.01a on Ubuntu 20.04.2 LTS with python 3.8.5
+
 I am currently getting segfault errors when the GlobalStiffnessTimeStepper is active, so I have deactivated it currently. I was using it to dynamically change the time step to speed convergence, but it appears not to be working for this version of yade.
 '''
 
